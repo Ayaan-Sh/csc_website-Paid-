@@ -25,6 +25,28 @@ const CSCConversation = (() => {
 
   const MAX_CLARIFY_ATTEMPTS = 2;
 
+  /* Asked one at a time, right before a case is actually submitted,
+     so the team has a way to reach the person back. */
+  const CONTACT_FIELDS = [
+    { key: "name", prompt: "Before I send this to our team, what's your full name?", placeholder: "Your full name…" },
+    { key: "phone", prompt: "What's the best phone number to reach you on?", placeholder: "Phone number…" },
+    { key: "email", prompt: "And your email address?", placeholder: "Email address…" }
+  ];
+
+  function validateContactField(key, value) {
+    const trimmed = String(value || "").trim();
+    if (key === "email") return /\S+@\S+\.\S+/.test(trimmed);
+    if (key === "phone") return trimmed.replace(/\D/g, "").length >= 7;
+    return trimmed.length > 1;
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
   let session = null;
 
   /* ---------- Boot ---------- */
@@ -79,7 +101,9 @@ const CSCConversation = (() => {
       if (m.from === "bot") CSCUi.addHtmlBlock(m.text);
       else CSCUi.addUserMessage(m.text);
     });
-    if (session.completed) {
+    if (session.stage === "contactInfo") {
+      resumeCurrentStep();
+    } else if (session.completed) {
       CSCUi.setProgress(0, 0);
       showEscalation(session.lastSummary || null);
     } else {
@@ -104,17 +128,19 @@ const CSCConversation = (() => {
     persist();
 
     say("Hi 👋 I'm the CSC Digital Case Officer.")
-      .then(() => say("I'm here to help. Tell me what happened."))
-      .then(() => CSCUi.showTextInput(handleFreeformMessage, "Tell me what happened…"));
+      .then(() => say("Tell me what happened in your own words, or just pick what's closest below."))
+      .then(() => renderCategoryOptions());
   }
 
   function resumeCurrentStep() {
     if (session.stage === "flow") {
       renderStepControls();
-    } else if (session.stage === "categoryFallback") {
-      renderCategoryFallback();
+    } else if (session.stage === "categoryFallback" || session.stage === "listening") {
+      renderCategoryOptions();
+    } else if (session.stage === "contactInfo") {
+      resumeContactCollection();
     } else {
-      // 'listening' or 'clarifying' — the box is simply ready for more.
+      // 'clarifying' — the box is simply ready for more.
       CSCUi.showTextInput(handleFreeformMessage, "Tell me what happened…");
     }
   }
@@ -155,18 +181,22 @@ const CSCConversation = (() => {
     persist();
     say("No problem, let's narrow this down together.")
       .then(() => say("Which of these is closest to what you're dealing with?"))
-      .then(renderCategoryFallback);
+      .then(renderCategoryOptions);
   }
 
-  function renderCategoryFallback() {
+  /* Shared by the opening screen AND the fallback path — quick-select
+     chips are always shown alongside the live text box, never instead
+     of it, so the person can tap a category or just keep typing. */
+  function renderCategoryOptions() {
     const options = CSCFlows.CATEGORIES.map(c => c.label);
     CSCUi.renderQuickReplies(options, (choice) => {
       CSCUi.addUserMessage(choice);
       record("user", choice);
       const category = CSCFlows.CATEGORIES.find(c => c.label === choice);
+      session.clarifyAttempts = 0;
       beginFlow(category.defaultIncident);
     });
-    CSCUi.showTextInput(handleFreeformMessage, "Or just tell me a bit more…");
+    CSCUi.showTextInput(handleFreeformMessage, "Or type here…");
   }
 
   /* ---------- Running a flow ---------- */
@@ -265,17 +295,20 @@ const CSCConversation = (() => {
 
       if (choice.includes("WhatsApp")) {
         window.open(CONFIG.whatsappHref, "_blank", "noopener");
-        say("Opening WhatsApp, our team will pick up the conversation from there.");
+        say("Opening WhatsApp, our team will pick up the conversation from there.")
+          .then(() => CSCUi.showTextInput(handleFreeformMessage, "Or ask me anything else…"));
       } else if (choice.includes("Call")) {
-        window.location.href = CONFIG.phoneHref;
+        say(`You can reach our expert team directly at <a href="${CONFIG.phoneHref}" class="csc-inline-link">${CONFIG.phoneDisplay}</a>. Tap the number to call, or note it down.`)
+          .then(() => CSCUi.showTextInput(handleFreeformMessage, "Or ask me anything else…"));
       } else if (choice.includes("Book")) {
         say(`You can book a consultation here: ${CONFIG.contactFormUrl}`).then(() => {
           window.location.href = CONFIG.contactFormUrl;
         });
       } else if (choice.includes("Submit")) {
-        submitCase(summary);
+        beginContactCollection();
+      } else {
+        CSCUi.showTextInput(handleFreeformMessage, "Or ask me anything else…");
       }
-      CSCUi.showTextInput(handleFreeformMessage, "Or ask me anything else…");
     });
 
     // Even after the flow completes, free text still works — e.g. the
@@ -283,32 +316,115 @@ const CSCConversation = (() => {
     CSCUi.showTextInput(handleFreeformMessage, "Or ask me anything else…");
   }
 
-  async function submitCase(summary) {
+  /* ---------- Contact details (asked once, right before submitting) ---------- */
+
+  function beginContactCollection() {
+    if (!session.lastSummary) {
+      say("There's no case summary to submit yet, let's go through a few questions first.").then(() =>
+        CSCUi.showTextInput(handleFreeformMessage, "Tell me what happened…")
+      );
+      return;
+    }
+
+    session.stage = "contactInfo";
+    session.contactInfo = session.contactInfo || {};
+    persist();
+
+    say("So our team can reach you about this, I just need a few details first.")
+      .then(resumeContactCollection);
+  }
+
+  function resumeContactCollection() {
+    session.contactInfo = session.contactInfo || {};
+    const nextField = CONTACT_FIELDS.find(f => !session.contactInfo[f.key]);
+
+    if (!nextField) {
+      finalizeSubmission();
+      return;
+    }
+
+    say(nextField.prompt).then(() => {
+      CSCUi.showTextInput((value) => handleContactAnswer(nextField, value), nextField.placeholder);
+    });
+  }
+
+  function handleContactAnswer(field, value) {
+    CSCUi.addUserMessage(value);
+    record("user", value);
+
+    if (!validateContactField(field.key, value)) {
+      const retryMsg = field.key === "email"
+        ? "That doesn't look like a valid email — mind double-checking it?"
+        : field.key === "phone"
+        ? "That doesn't look like a complete phone number — mind double-checking it?"
+        : "I didn't quite catch that could you type it again?";
+      say(retryMsg).then(() => {
+        CSCUi.showTextInput((v) => handleContactAnswer(field, v), field.placeholder);
+      });
+      return;
+    }
+
+    session.contactInfo[field.key] = String(value).trim();
+    persist();
+    resumeContactCollection();
+  }
+
+  function finalizeSubmission() {
+    const info = session.contactInfo || {};
+    const recap = `
+      <div class="csc-summary-card">
+        <h4>Your Details</h4>
+        <div class="csc-summary-row"><span>Name</span><strong>${escapeHtml(info.name)}</strong></div>
+        <div class="csc-summary-row"><span>Phone</span><strong>${escapeHtml(info.phone)}</strong></div>
+        <div class="csc-summary-row"><span>Email</span><strong>${escapeHtml(info.email)}</strong></div>
+      </div>
+    `;
+    CSCUi.addHtmlBlock(recap);
+    record("bot", recap, { isContactRecap: true });
+
+    say("Thanks that's everything I need.").then(() => {
+      submitCase(session.lastSummary, info);
+    });
+  }
+
+  /* ---------- Sending the case to the team ---------- */
+
+  async function submitCase(summary, contactInfo) {
     if (!summary) {
       say("There's no case summary to submit yet, let's go through a few questions first.").then(() =>
         CSCUi.showTextInput(handleFreeformMessage, "Tell me what happened…")
       );
       return;
     }
+    const info = contactInfo || {};
     say("Sending your case to our team now…");
 
     try {
       const body = new FormData();
       body.append("access_key", CONFIG.web3formsAccessKey);
       body.append("subject", `New case intake: ${summary.incidentType}`);
-      body.append("from_name", "CSC Website Intake Assistant");
-      body.append("message", CSCSummary.renderSummaryText(summary));
+      body.append("from_name", info.name || "CSC Website Intake Assistant");
+      body.append("name", info.name || "Not provided");
+      body.append("email", info.email || "Not provided");
+      body.append("phone", info.phone || "Not provided");
+      body.append("message", CSCSummary.renderSummaryText(summary, info));
 
       const response = await fetch(CONFIG.web3formsEndpoint, { method: "POST", body });
       const result = await response.json();
 
+      session.stage = "summary";
+      persist();
+
       if (result.success) {
-        say("✅ Your case has been submitted. Our team will follow up within one business day sooner if it's urgent.");
+        say(`✅ Your case has been submitted. Our team will follow up at ${info.phone || "the number you gave"} within one business day sooner if it's urgent.`)
+          .then(() => CSCUi.showTextInput(handleFreeformMessage, "Or ask me anything else…"));
       } else {
-        say("I couldn't submit that automatically. Please use the case form or call us directly so nothing is lost.");
+        say("I couldn't submit that automatically. Please use the case form or call us directly so nothing is lost.")
+          .then(() => CSCUi.showTextInput(handleFreeformMessage, "Or ask me anything else…"));
       }
     } catch (err) {
-      say("❌ Something went wrong sending that. Please call us directly, or use the case form on the Services page.");
+      say("❌ Something went wrong sending that. Please call us directly, or use the case form on the Services page.")
+        .then(() => CSCUi.showTextInput(handleFreeformMessage, "Or ask me anything else…"));
     }
   }
 

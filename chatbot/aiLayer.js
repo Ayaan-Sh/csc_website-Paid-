@@ -53,8 +53,21 @@ const CSCAi = (() => {
     "That's a lot to deal with. I'm here to help you through it."
   ];
 
-  /* Score every intent by how many of its keywords appear in the
-     text, and return the best match (or null if nothing scores). */
+  const NEGATION_WORDS = ["not", "no", "never", "n't", "didn't", "wasn't", "isn't", "haven't"];
+
+  /* True if a negation word appears in the ~4 words immediately before
+     the keyword match, e.g. "I did NOT lose money" shouldn't score
+     toward a financial-fraud flow. Cheap heuristic, not real NLP. */
+  function isNegated(text, matchIndex) {
+    const windowStart = Math.max(0, matchIndex - 30);
+    const before = text.slice(windowStart, matchIndex).trim().split(/\s+/).slice(-4);
+    return before.some(word => NEGATION_WORDS.some(neg => word.includes(neg)));
+  }
+
+  /* Score every intent by its matching keywords, weighting more specific
+     (multi-word) phrases higher than generic single-word ones, and
+     skipping matches that are directly negated. Returns the best match
+     (or null if nothing scores). */
   function classifyIntent(rawText) {
     const text = String(rawText || "").toLowerCase();
 
@@ -62,10 +75,15 @@ const CSCAi = (() => {
     let bestScore = 0;
 
     INTENT_KEYWORDS.forEach(entry => {
-      const score = entry.keywords.reduce(
-        (count, kw) => count + (text.includes(kw) ? 1 : 0),
-        0
-      );
+      const score = entry.keywords.reduce((total, kw) => {
+        const idx = text.indexOf(kw);
+        if (idx === -1 || isNegated(text, idx)) return total;
+        // Multi-word phrases ("qr code") are more specific than single
+        // words ("whatsapp"), so they should outweigh them on ties.
+        const specificity = kw.trim().split(/\s+/).length;
+        return total + specificity;
+      }, 0);
+
       if (score > bestScore) {
         bestScore = score;
         best = entry.incidentType;

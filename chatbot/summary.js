@@ -106,9 +106,16 @@ const CSCSummary = (() => {
     `;
   }
 
-  /* Plain-text version used as the message body submitted to Web3Forms */
-  function renderSummaryText(summary) {
+  /* Plain-text version used as the message body submitted to Web3Forms.
+     contactInfo is optional (name/phone/email collected right before
+     submission) so this still works if it's ever called without it. */
+  function renderSummaryText(summary, contactInfo) {
+    const info = contactInfo || {};
     return [
+      `Name: ${info.name || "—"}`,
+      `Phone: ${info.phone || "—"}`,
+      `Email: ${info.email || "—"}`,
+      "",
       `Incident Type: ${summary.incidentType}`,
       `Amount Lost: ${summary.amountLost}`,
       `Timeline: ${summary.timeline}`,
@@ -121,14 +128,9 @@ const CSCSummary = (() => {
     ].join("\n");
   }
 
-  /* Minimal escaping since caseData can contain free-typed user text
-     that gets dropped straight into innerHTML via addHtmlBlock. */
-  function escapeHtml(str) {
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
+  /* Shared escaper (animation.js) since caseData can contain free-typed
+     user text that gets dropped straight into innerHTML via addHtmlBlock. */
+  const escapeHtml = CSCAnimations.escapeHtml;
 
   return { buildSummary, renderSummaryCard, renderSummaryText };
 

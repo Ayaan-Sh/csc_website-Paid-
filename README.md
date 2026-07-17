@@ -3,13 +3,10 @@ Stipend-15k
 
 
 your-site/
-├── index.html          
-├── services.html       
-├── style.css           
-├── script.js          
-└── chatbot/            
+└── chatbot/
     ├── storage.js
-    ├── animations.js
+    ├── animation.js       
+    ├── aiLayer.js         
     ├── flows.js
     ├── summary.js
     ├── ui.js

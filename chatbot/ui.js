@@ -57,8 +57,11 @@ const CSCUi = (() => {
           </div>
         </header>
 
-        <div class="csc-progress" id="cscProgress" hidden>
-          <div class="csc-progress-fill" id="cscProgressFill"></div>
+        <div class="csc-progress-wrap" id="cscProgressWrap" hidden>
+          <div class="csc-progress" id="cscProgress">
+            <div class="csc-progress-fill" id="cscProgressFill"></div>
+          </div>
+          <span class="csc-progress-label" id="cscProgressLabel"></span>
         </div>
 
         <div class="csc-body" id="cscBody" aria-live="polite"></div>
@@ -88,7 +91,9 @@ const CSCUi = (() => {
       resetBtn: document.getElementById("cscResetBtn"),
       closeBtn: document.getElementById("cscCloseBtn"),
       progress: document.getElementById("cscProgress"),
-      progressFill: document.getElementById("cscProgressFill")
+      progressFill: document.getElementById("cscProgressFill"),
+      progressWrap: document.getElementById("cscProgressWrap"),
+      progressLabel: document.getElementById("cscProgressLabel")
     };
 
     // The text box is wired ONCE, here, and stays visible and active for
@@ -101,6 +106,9 @@ const CSCUi = (() => {
       e.preventDefault();   // never submit a page form, reload, or lose focus
       e.stopPropagation();
       submitFromInput();
+    });
+    els.textInput.addEventListener("input", () => {
+      els.sendBtn.classList.toggle("csc-send-btn-active", els.textInput.value.trim().length > 0);
     });
 
     return els;
@@ -134,12 +142,7 @@ const CSCUi = (() => {
     return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
+  const escapeHtml = CSCAnimations.escapeHtml;
 
   function addMessage(from, html) {
     const wrap = document.createElement("div");
@@ -216,6 +219,7 @@ const CSCUi = (() => {
     els.textInput.value = "";
     els.textInput.disabled = false;
     els.textInput.placeholder = placeholder || "Type your message…";
+    els.sendBtn.classList.remove("csc-send-btn-active");
     currentSubmit = onSubmit;
     els.textInput.focus({ preventScroll: true });
   }
@@ -226,6 +230,7 @@ const CSCUi = (() => {
     const fn = currentSubmit;
     currentSubmit = null;
     els.textInput.value = "";
+    els.sendBtn.classList.remove("csc-send-btn-active");
     fn(val);
   }
 
@@ -241,12 +246,14 @@ const CSCUi = (() => {
 
   function setProgress(current, total) {
     if (!total) {
-      els.progress.hidden = true;
+      els.progressWrap.hidden = true;
       return;
     }
-    els.progress.hidden = false;
-    const pct = Math.min(100, Math.round((current / total) * 100));
+    els.progressWrap.hidden = false;
+    const clampedCurrent = Math.min(current, total);
+    const pct = Math.min(100, Math.round((clampedCurrent / total) * 100));
     els.progressFill.style.width = pct + "%";
+    els.progressLabel.textContent = `Step ${Math.min(clampedCurrent + 1, total)} of ${total}`;
   }
 
   /* ---------- Theme ---------- */

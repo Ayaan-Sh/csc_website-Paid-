@@ -41,6 +41,18 @@ const CSCAnimations = (() => {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  return { animateIn, scrollToBottom, buildTypingIndicator, wait };
+  /* Single source of truth for HTML-escaping user-typed text before it
+     goes into innerHTML anywhere (transcript bubbles, summary card,
+     contact recap). Previously copy-pasted in three files. */
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  return { animateIn, scrollToBottom, buildTypingIndicator, wait, escapeHtml };
 
 })();
