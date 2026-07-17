@@ -1343,6 +1343,7 @@ button { font-family: inherit; cursor: pointer; }
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 0.9rem 1.5rem;
+  margin-top: 5.5rem;
 }
 .cat-list li {
   display: flex;
